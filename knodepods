@@ -1,0 +1,38 @@
+#!/bin/bash
+
+usage() {
+  cat <<EOF
+Usage: $0 [-A|--all|-n <namespace>]
+
+Options:
+  -A,--all              Show pods from all namespaces
+  -n <namespace>	Only show pods from <namespace> - defaults to setting in kubeconfig
+  -h,--help             Shows this helpful message
+EOF
+}
+
+get_node_pods() {
+  NODE=$1
+  test -z "$NODE" && return
+
+  NODE_IP=$(jq '.items[] | select(.metadata.name == '$NODE') | .status.addresses[] | select(.type == "InternalIP") | .address' <<<"$NODE_LIST_JSON")
+
+  echo "NAMESPACE NAME READY STATE RESTART AGE"
+  jq '.items[] | select(.status.hostIP == '$NODE_IP') | [.metadata.namespace, .metadata.name, ([([.status.containerStatuses[] | select(.ready == true)] | length), (.status.containerStatuses | length)] | join("/")), .status.phase, ([.status.containerStatuses[].restartCount] | add), .status.startTime] | join(" ")' <<<"$POD_LIST_JSON" | sed 's/^"\(.*\)"$/\1/'
+}
+
+for arg in $@; do
+  if [ $arg == "-h" -o $arg == "--help" ]; then
+    usage
+  fi
+done
+
+NODE_LIST_JSON=$(kubectl get nodes -o json)
+POD_LIST_JSON=$(kubectl get po $@ -o json)
+
+NODES=$(jq '.items[].metadata.name' <<<"$NODE_LIST_JSON")
+for node in $NODES; do
+  echo $node: | tr -d '"'
+  get_node_pods $node | column -t
+  echo
+done
